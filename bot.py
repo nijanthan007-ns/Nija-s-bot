@@ -56,7 +56,7 @@ def get_openai_reply(user_msg):
 
 def send_whatsapp_message(to, text):
     url = "https://api.ultramsg.com/YOUR_INSTANCE_ID/messages/chat"
-    token = "YOUR_ULTRAMSG_TOKEN"
+    token = "shnmtd393b5963kq"
     payload = {
         "to": to,
         "body": text
