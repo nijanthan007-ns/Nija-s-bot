@@ -1,62 +1,71 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import requests
-import openai
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = Flask(__name__)
 
-# Your credentials
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
 
-@app.route('/webhook', methods=['POST'])
+@app.route("/", methods=["GET"])
+def home():
+    return "WhatsApp AI Bot is running!"
+
+@app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
-
-    if 'data' in data and len(data['data']) > 0:
-        message = data['data'][0]
-        text = message.get("body", "")
-        phone_number = message["from"]
-
-        if text:
-            reply = get_openai_response(text)
-            send_message(phone_number, reply)
-
-    return "OK", 200
-
-def get_openai_response(prompt):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # or gpt-4 if allowed
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
+        data = request.get_json()
+        
+        # UltraMsg format
+        messages = data.get("data", {}).get("messages", [])
+        if not messages:
+            return jsonify({"status": "ignored – no message"}), 200
+
+        message = messages[0]
+        sender = message.get("from")
+        text = message.get("text", {}).get("body")
+
+        if not sender or not text:
+            return jsonify({"status": "ignored – incomplete message"}), 200
+
+        # Send to OpenAI
+        reply = get_openai_reply(text)
+
+        # Send reply to WhatsApp
+        send_whatsapp_message(sender, reply)
+        return jsonify({"status": "ok"}), 200
+
     except Exception as e:
-        return f"Error: {e}"
+        print("❌ Error:", e)
+        return jsonify({"error": str(e)}), 500
 
-def send_message(to, message):
-    url = os.getenv("ULTRAMSG_URL")
-    token = os.getenv("ULTRAMSG_TOKEN")
-    instance_id = os.getenv("ULTRAMSG_INSTANCE_ID")
 
-    payload = {
-        "to": to,
-        "body": message,
-        "priority": 10,
-        "referenceId": "openai-whatsapp-bot"
-    }
-
+def get_openai_reply(user_msg):
+    url = "https://api.openai.com/v1/chat/completions"
     headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json"
     }
+    payload = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": user_msg}]
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    reply = response.json()["choices"][0]["message"]["content"]
+    return reply.strip()
 
-    full_url = f"{url}/instance{instance_id}/messages/chat"
-    requests.post(full_url, json=payload, headers=headers)
 
-# ⚠️ REMOVE this if using Gunicorn (Render)
-# if __name__ == "__main__":
-#     app.run(debug=False)
+def send_whatsapp_message(to, text):
+    url = "https://api.ultramsg.com/YOUR_INSTANCE_ID/messages/chat"
+    token = "YOUR_ULTRAMSG_TOKEN"
+    payload = {
+        "to": to,
+        "body": text
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    requests.post(url, json=payload, headers=headers)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
