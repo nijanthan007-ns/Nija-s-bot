@@ -1,17 +1,13 @@
 import os
 import requests
 from flask import Flask, request
-from dotenv import load_dotenv
-
-# Load .env file
-load_dotenv()
 
 app = Flask(__name__)
 
-# Load environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
-ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
+# Hardcoded credentials (you provided)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # still safely from .env
+ULTRAMSG_INSTANCE_ID = "instance133623"
+ULTRAMSG_TOKEN = "shnmtd393b5963kq"
 
 
 def ask_openai(question):
@@ -44,10 +40,9 @@ def ask_openai(question):
 
 def send_whatsapp_message(to, text):
     try:
-        url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
+        url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat?token={ULTRAMSG_TOKEN}"
         headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {ULTRAMSG_TOKEN}"
+            "Content-Type": "application/json"
         }
 
         payload = {
