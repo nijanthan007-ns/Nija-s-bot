@@ -1,50 +1,67 @@
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request
 import requests
 import openai
-import os
+from dotenv import load_dotenv
 
-# Load from environment variables
-openai.api_key = os.environ.get("OPENAI_API_KEY")
-ULTRAMSG_API_URL = os.environ.get("ULTRAMSG_API_URL")
-ULTRAMSG_TOKEN = os.environ.get("ULTRAMSG_TOKEN")
+load_dotenv()
 
 app = Flask(__name__)
+
+# Load secrets from environment variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ULTRAMSG_API_URL = os.getenv("ULTRAMSG_API_URL")
+ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
+
+openai.api_key = OPENAI_API_KEY
+
+@app.route('/')
+def home():
+    return "🤖 WhatsApp AI bot is running!"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
-    if 'message' in data and 'from' in data:
-        phone_number = data['from']
-        incoming_msg = data['message']
+    print("Webhook received:", data)
 
-        # Get AI reply
-        reply = chatgpt_response(incoming_msg)
+    if not data or "data" not in data or not data["data"]:
+        print("Invalid data format")
+        return "Invalid", 400
 
-        # Send reply to WhatsApp
-        send_whatsapp_message(phone_number, reply)
+    message = data["data"][0]
+    text = message.get("body")
+    sender = message.get("from")
 
-    return jsonify({"status": "ok"})
+    print(f"User said: {text}")
 
-def chatgpt_response(prompt):
+    if not text or not sender:
+        print("Missing text or sender")
+        return "Missing info", 400
+
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+            messages=[{"role": "user", "content": text}]
         )
-        return response['choices'][0]['message']['content'].strip()
+        reply = response.choices[0].message.content.strip()
+        print(f"AI Reply: {reply}")
+
+        # Send reply via UltraMsg
+        send_url = f"{ULTRAMSG_API_URL}messages/chat"
+        payload = {
+            "token": ULTRAMSG_TOKEN,
+            "to": sender,
+            "body": reply
+        }
+
+        send_response = requests.post(send_url, data=payload)
+        print("Send response:", send_response.text)
+
+        return "OK", 200
+
     except Exception as e:
-        return "Error: " + str(e)
+        print("Error:", e)
+        return "Error", 500
 
-def send_whatsapp_message(to, message):
-    url = f"{ULTRAMSG_API_URL}messages/chat"
-    payload = {
-        "token": ULTRAMSG_TOKEN,
-        "to": to,
-        "body": message
-    }
-    requests.post(url, data=payload)
-
-# Required for cloud platforms like Render
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=10000)
