@@ -9,8 +9,7 @@ INSTANCE_ID = "133623"
 TOKEN = "shnmtd393b5963kq"
 
 # FREE API hosted on Railway (works without API key)
-HF_FREE_API_URL = "https://chatbot-api-production.up.railway.app"
-
+HF_FREE_API_URL = "https://huggingface-api-ultra.vercel.app/api"
 @app.route("/")
 def home():
     return "WhatsApp AI Bot is running"
