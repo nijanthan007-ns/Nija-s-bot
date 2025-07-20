@@ -1,78 +1,60 @@
-import os
+from flask import Flask, request
 import requests
-from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# UltraMsg details
+# UltraMsg credentials
 INSTANCE_ID = "133623"
-TOKEN = "shnmtd393b5963kq"
+ULTRAMSG_TOKEN = "shnmtd393b5963kq"
 
-# FREE API hosted on Railway (works without API key)
-HF_FREE_API_URL = "https://huggingface-api-ultra.vercel.app/api"
+# Public HF model endpoint (keyless)
+HF_MODEL_URL = "https://hf.space/embed/OpenAssistant/oasst-sft-1-pythia-12b/api/predict"
+
+# WhatsApp reply function
+def send_whatsapp_message(to, message):
+    url = f"https://api.ultramsg.com/instance133623/messages/chat"
+    payload = {
+        "token": ULTRAMSG_TOKEN,
+        "to": to,
+        "body": message
+    }
+    try:
+        response = requests.post(url, data=payload)
+        print("UltraMsg Response:", response.status_code, response.text)
+    except Exception as e:
+        print("Error sending message:", str(e))
+
+# Hugging Face model call
+def ask_huggingface(prompt):
+    try:
+        res = requests.post(HF_MODEL_URL, json={"data": [prompt]}, timeout=30)
+        res.raise_for_status()
+        output = res.json()["data"][0]
+        return output.strip()
+    except Exception as e:
+        print("Error calling Hugging Face API:", str(e))
+        return "Sorry, I couldn't process that."
+
 @app.route("/")
 def home():
-    return "WhatsApp AI Bot is running"
+    return "WhatsApp bot is running."
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    data = request.json
+    print("Incoming:", data)
     try:
-        data = request.get_json()
-        print("Incoming:", data)
+        if data["event_type"] == "message_received":
+            msg_data = data["data"]
+            sender = msg_data["from"]
+            msg = msg_data["body"]
 
-        if not data or "data" not in data:
-            return jsonify({"status": "no data"}), 400
-
-        message_data = data["data"]
-        msg_type = message_data.get("type")
-        from_number = message_data.get("from")
-        text = message_data.get("body", "")
-
-        if msg_type != "chat" or not text:
-            print("No text found or unsupported type.")
-            return jsonify({"status": "ignored"}), 200
-
-        # Get reply from free endpoint
-        reply = get_bot_reply(text)
-
-        if not reply:
-            reply = "Sorry, I couldn't process that."
-
-        send_message(from_number, reply)
-
-        return jsonify({"status": "success"}), 200
-
+            # Ask HF
+            reply = ask_huggingface(msg)
+            send_whatsapp_message(sender, reply)
     except Exception as e:
-        print("Error:", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-def get_bot_reply(user_input):
-    try:
-        response = requests.post(
-            HF_FREE_API_URL,
-            headers={"Content-Type": "application/json"},
-            json={"message": user_input},
-            timeout=30,
-        )
-        response.raise_for_status()
-        result = response.json()
-
-        return result.get("response", "I'm not sure.")
-    except Exception as e:
-        print("Error calling free API:", e)
-        return None
-
-def send_message(to_number, message):
-    url = f"https://api.ultramsg.com/instance133623/messages/chat"
-    payload = {
-        "token": TOKEN,
-        "to": to_number,
-        "body": message,
-    }
-    response = requests.post(url, data=payload)
-    print("UltraMsg Response:", response.status_code, response.text)
+        print("Error in webhook:", str(e))
+    return "ok", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
-
-
+    app.run(debug=True)
