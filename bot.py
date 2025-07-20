@@ -1,85 +1,86 @@
+import os
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
+from dotenv import load_dotenv
 
-# 🔐 Groq API Key (replace with your real one)
-GROQ_API_KEY = "gsk_YOUR_GROQ_API_KEY_HERE"  # <-- Replace this
+load_dotenv()
 
-# 🌐 Groq API URL
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-# 📲 UltraMsg Configuration
-ULTRAMSG_INSTANCE_ID = "instance133623"
-ULTRAMSG_TOKEN = "shnmtd393b5963kq"
-ULTRAMSG_API_URL = f"https://api.ultramsg.com/instance133623/"
-
-# 🚀 Flask app
 app = Flask(__name__)
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json
-    print("📩 Incoming:", data)
+# Load credentials from environment
+ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
+ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-    if not data or "data" not in data or not data["data"]:
-        return "⚠️ Invalid payload", 400
+ULTRAMSG_URL = f"https://api.ultramsg.com/instance133623/messages/chat"
 
-    message = data["data"][0]
-    text = message.get("body", "").strip()
-    sender = message.get("from")
+HEADERS = {
+    "Authorization": f"Bearer {GROQ_API_KEY}",
+    "Content-Type": "application/json"
+}
 
-    if not text or not sender:
-        return "⚠️ Missing sender or message text", 400
 
-    # 🧠 Get AI response
-    reply = get_groq_reply(text)
-    print("🤖 Reply:", reply)
-
-    # 📤 Send WhatsApp reply
-    sent = send_whatsapp_message(sender, reply)
-    return "✅ OK" if sent else "❌ Failed", 200
-
-def get_groq_reply(user_input):
+def ask_groq(message):
     try:
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
         payload = {
-            "model": "llama3-8b-8192",  # You can also try llama3-70b-8192 if needed
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_input}
-            ],
-            "temperature": 0.7
+            "messages": [{"role": "user", "content": message}],
+            "model": "llama3-8b-8192"
         }
-
-        response = requests.post(GROQ_API_URL, headers=headers, json=payload)
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=HEADERS,
+            json=payload,
+            timeout=20
+        )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
-
+        reply = response.json()["choices"][0]["message"]["content"]
+        return reply.strip()
     except Exception as e:
-        print("❌ Groq error:", e)
+        print("Error from Groq:", str(e))
         return "Sorry, I couldn't process that."
 
-def send_whatsapp_message(to, message):
+
+def send_whatsapp_reply(to, message):
     try:
-        url = f"{ULTRAMSG_API_URL}messages/chat"
         payload = {
             "token": ULTRAMSG_TOKEN,
             "to": to,
             "body": message
         }
-        response = requests.post(url, data=payload)
-        print("📤 UltraMsg Response:", response.status_code, response.text)
+        response = requests.post(ULTRAMSG_URL, data=payload)
+        print("UltraMsg Response:", response.status_code, response.text)
         return response.status_code == 200
     except Exception as e:
-        print("❌ UltraMsg Error:", e)
+        print("Error sending message to WhatsApp:", e)
         return False
 
-@app.route("/", methods=["GET"])
-def home():
-    return "✅ Groq WhatsApp Bot is Running!"
 
-if __name__ == "__main__":
-    app.run(debug=False, port=5000)
+@app.route('/')
+def home():
+    return "Groq WhatsApp Bot is running!"
+
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.get_json()
+    print("Incoming:", data)
+
+    try:
+        if "body" in data and "text" in data["body"]:
+            sender = data["body"]["from"]
+            text = data["body"]["text"]
+
+            print("Text:", text)
+            reply = ask_groq(text)
+            print("Reply:", reply)
+
+            sent = send_whatsapp_reply(sender, reply)
+            print("Message sent:", sent)
+        else:
+            print("No text found in request.")
+
+    except Exception as e:
+        print("Webhook error:", e)
+
+    return jsonify({"status": "received"}), 200
 
