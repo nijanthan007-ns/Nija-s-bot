@@ -5,74 +5,73 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
-ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-ULTRAMSG_URL = f"https://api.ultramsg.com/instance133623/messages/chat"
-
 app = Flask(__name__)
 
-@app.route("/")
-def index():
-    return "WhatsApp + Groq bot is live!", 200
+# UltraMsg credentials from .env
+ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
+ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    incoming = request.get_json()
-    print("Incoming:", incoming)
+# Hugging Face API
+HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HF_API_KEY = os.getenv("HF_API_KEY")
 
-    if not incoming or "data" not in incoming:
-        return jsonify({"error": "Invalid format"}), 400
+headers = {"Authorization": f"Bearer {HF_API_KEY}"}
 
-    data = incoming["data"]
-    sender = data.get("from")
-    message_text = data.get("body")
-
-    if not sender or not message_text:
-        print("No sender or message found.")
-        return jsonify({"status": "ignored"}), 200
-
-    print(f"Message from {sender}: {message_text}")
-
-    # Call Groq API
+def query_huggingface(prompt):
     try:
-        groq_response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama3-8b-8192",
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": message_text}
-                ]
-            }
-        )
-        groq_response.raise_for_status()
-        reply = groq_response.json()["choices"][0]["message"]["content"].strip()
+        payload = {
+            "inputs": f"User: {prompt}\nAssistant:",
+            "parameters": {"max_new_tokens": 150, "return_full_text": False},
+        }
+        response = requests.post(HF_API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data[0]['generated_text'].strip() if isinstance(data, list) else "Sorry, I couldn't understand that."
     except Exception as e:
-        print("Error in Groq call:", str(e))
-        reply = "Sorry, I couldn't process that."
+        print(f"Error in Hugging Face API: {e}")
+        return "Sorry, I couldn't process that."
 
-    print(f"Reply: {reply}")
-
-    # Send message using UltraMsg
+def send_whatsapp_message(to, message):
+    url = f"https://api.ultramsg.com/instance133623/messages/chat"
     payload = {
         "token": ULTRAMSG_TOKEN,
-        "to": sender,
-        "body": reply
+        "to": to,
+        "body": message
     }
     try:
-        response = requests.post(ULTRAMSG_URL, data=payload)
-        print("UltraMsg Response:", response.status_code, response.text)
+        response = requests.post(url, data=payload)
+        print(f"UltraMsg Response: {response.status_code} {response.text}")
+        return response.status_code == 200
     except Exception as e:
-        print("Error sending via UltraMsg:", str(e))
+        print(f"UltraMsg Send Error: {e}")
+        return False
 
-    return jsonify({"status": "ok"}), 200
+@app.route('/')
+def home():
+    return "🤖 WhatsApp AI Chatbot is running!"
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.json
+    print("Incoming:", data)
+
+    try:
+        msg_data = data.get("data", {})
+        sender = msg_data.get("from")
+        msg_text = msg_data.get("body")
+
+        if not sender or not msg_text:
+            print("Missing sender or message text.")
+            return jsonify({"status": "ignored"}), 200
+
+        reply = query_huggingface(msg_text)
+        success = send_whatsapp_message(sender, reply)
+        return jsonify({"status": "sent" if success else "failed"}), 200
+
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return jsonify({"status": "error"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host='0.0.0.0', port=10000)
 
