@@ -7,71 +7,84 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# UltraMsg credentials from .env
-ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
-ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
+# UltraMsg details
+INSTANCE_ID = "133623"
+TOKEN = "shnmtd393b5963kq"
 
-# Hugging Face API
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-HF_API_KEY = os.getenv("HF_API_KEY")
+# Hugging Face free model (no key needed)
+HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
 
-headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-
-def query_huggingface(prompt):
-    try:
-        payload = {
-            "inputs": f"User: {prompt}\nAssistant:",
-            "parameters": {"max_new_tokens": 150, "return_full_text": False},
-        }
-        response = requests.post(HF_API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return data[0]['generated_text'].strip() if isinstance(data, list) else "Sorry, I couldn't understand that."
-    except Exception as e:
-        print(f"Error in Hugging Face API: {e}")
-        return "Sorry, I couldn't process that."
-
-def send_whatsapp_message(to, message):
-    url = f"https://api.ultramsg.com/instance133623/messages/chat"
-    payload = {
-        "token": ULTRAMSG_TOKEN,
-        "to": to,
-        "body": message
-    }
-    try:
-        response = requests.post(url, data=payload)
-        print(f"UltraMsg Response: {response.status_code} {response.text}")
-        return response.status_code == 200
-    except Exception as e:
-        print(f"UltraMsg Send Error: {e}")
-        return False
-
-@app.route('/')
+@app.route("/")
 def home():
-    return "🤖 WhatsApp AI Chatbot is running!"
+    return "WhatsApp AI Bot is running"
 
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
-    print("Incoming:", data)
-
     try:
-        msg_data = data.get("data", {})
-        sender = msg_data.get("from")
-        msg_text = msg_data.get("body")
+        data = request.get_json()
+        print("Incoming:", data)
 
-        if not sender or not msg_text:
-            print("Missing sender or message text.")
+        if not data or "data" not in data:
+            return jsonify({"status": "no data"}), 400
+
+        message_data = data["data"]
+        msg_type = message_data.get("type")
+        from_number = message_data.get("from")
+        text = message_data.get("body", "")
+
+        if msg_type != "chat" or not text:
+            print("No text found or unsupported type.")
             return jsonify({"status": "ignored"}), 200
 
-        reply = query_huggingface(msg_text)
-        success = send_whatsapp_message(sender, reply)
-        return jsonify({"status": "sent" if success else "failed"}), 200
+        # Get reply from Hugging Face
+        reply = get_bot_reply(text)
+
+        if not reply:
+            reply = "Sorry, I couldn't process that."
+
+        # Send reply via UltraMsg
+        send_message(from_number, reply)
+
+        return jsonify({"status": "success"}), 200
 
     except Exception as e:
-        print(f"Webhook error: {e}")
-        return jsonify({"status": "error"}), 500
+        print("Error:", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def get_bot_reply(user_input):
+    try:
+        response = requests.post(
+            HUGGINGFACE_API_URL,
+            headers={"Content-Type": "application/json"},
+            json={"inputs": user_input},
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if isinstance(result, list) and "generated_text" in result[0]:
+            return result[0]["generated_text"]
+
+        # Some models return full response as dict
+        if isinstance(result, dict) and "generated_text" in result:
+            return result["generated_text"]
+
+        # Default fallback
+        return result[0].get("generated_text", "I'm not sure.")
+    except Exception as e:
+        print("Error in Hugging Face API:", e)
+        return None
+
+def send_message(to_number, message):
+    url = f"https://api.ultramsg.com/instance133623/messages/chat"
+    payload = {
+        "token": TOKEN,
+        "to": to_number,
+        "body": message,
+    }
+    response = requests.post(url, data=payload)
+    print("UltraMsg Response:", response.status_code, response.text)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host="0.0.0.0", port=10000)
 
