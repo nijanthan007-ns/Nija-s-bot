@@ -1,9 +1,6 @@
 import os
 import requests
 from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = Flask(__name__)
 
@@ -11,8 +8,8 @@ app = Flask(__name__)
 INSTANCE_ID = "133623"
 TOKEN = "shnmtd393b5963kq"
 
-# Hugging Face free model (no key needed)
-HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
+# FREE API hosted on Railway (works without API key)
+HF_FREE_API_URL = "https://chatbot-api-production.up.railway.app"
 
 @app.route("/")
 def home():
@@ -36,13 +33,12 @@ def webhook():
             print("No text found or unsupported type.")
             return jsonify({"status": "ignored"}), 200
 
-        # Get reply from Hugging Face
+        # Get reply from free endpoint
         reply = get_bot_reply(text)
 
         if not reply:
             reply = "Sorry, I couldn't process that."
 
-        # Send reply via UltraMsg
         send_message(from_number, reply)
 
         return jsonify({"status": "success"}), 200
@@ -54,25 +50,17 @@ def webhook():
 def get_bot_reply(user_input):
     try:
         response = requests.post(
-            HUGGINGFACE_API_URL,
+            HF_FREE_API_URL,
             headers={"Content-Type": "application/json"},
-            json={"inputs": user_input},
+            json={"message": user_input},
             timeout=30,
         )
         response.raise_for_status()
         result = response.json()
 
-        if isinstance(result, list) and "generated_text" in result[0]:
-            return result[0]["generated_text"]
-
-        # Some models return full response as dict
-        if isinstance(result, dict) and "generated_text" in result:
-            return result["generated_text"]
-
-        # Default fallback
-        return result[0].get("generated_text", "I'm not sure.")
+        return result.get("response", "I'm not sure.")
     except Exception as e:
-        print("Error in Hugging Face API:", e)
+        print("Error calling free API:", e)
         return None
 
 def send_message(to_number, message):
@@ -87,4 +75,5 @@ def send_message(to_number, message):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
